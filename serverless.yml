@@ -1,3 +1,5 @@
+org: ptensor
+app: unin-api
 service: unin-api
 frameworkVersion: '2 || 3'
 
@@ -5,12 +7,42 @@ provider:
   name: aws
   runtime: nodejs14.x
   lambdaHashingVersion: '20201221'
+  vpc:
+    securityGroupIds:
+      - ${param:securityGroupId1}
+      - ${param:securityGroupId2}
+    subnetIds:
+      - ${param:subnetId1}
+      - ${param:subnetId2}
 
 functions:
   api:
     handler: handler.handler
+    environment:
+      POSTGRES_HOST: ${param:POSTGRES_HOST}
+      POSTGRES_PORT: ${param:POSTGRES_PORT}
+      POSTGRES_DATABASE: ${param:POSTGRES_DATABASE}
+      POSTGRES_USERNAME: ${param:POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${param:POSTGRES_PASSWORD}
+      CONTRACT: ${param:CONTRACT}
+      WEB3_PROVIDER: ${param:WEB3_PROVIDER}
     events:
-      - httpApi: '*'
+      - http:
+          method: 'GET'
+          path: "/items/owner/{owner}"
+          cors: true
+      - http:
+          method: 'GET'
+          path: "/items/{id}"
+          cors: true
+      - http:
+          method: 'POST'
+          path: "/items/claim/{id}"
+          cors: true
+      - http:
+          method: 'POST'
+          path: "/items/{id}"
+          cors: true
 
 plugins:
   - serverless-offline

@@ -21,10 +21,17 @@ class ApiError extends Error {
     }
 }
 
+// cors
+app.use(function (req, res, next) {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    next();
+});
+
 const handleApiError = (err, res) => {
     if (err instanceof ApiError)
         return res.status(err.statusCode).json({ message: err.message });
-    console.log(err);
+    console.error(err);
     res.status(500).json({ message: "Internal server error" });
 }
 
@@ -75,7 +82,7 @@ app.get('/items/:id', async function (req, res) {
         if (!validator.isNumeric(req.params.id))
             throw new ApiError("Invalid id", 400);
 
-        pgClient.connect();
+        await pgClient.connect();
 
         const query = `SELECT owner, name, "desc", uri FROM items WHERE item_id = $1`;
         const result = await pgClient.query(query, [req.params.id]);
@@ -135,7 +142,7 @@ app.post('/items/claim/:id', async function (req, res) {
     pgClient.end();
 });
 
-app.put('/items/:id', async function (req, res) {
+app.post('/items/:id', async function (req, res) {
     const itemId = req.params.id;
     const {
         name,
@@ -159,7 +166,7 @@ app.put('/items/:id', async function (req, res) {
         if (!message || !signature)
             throw new ApiError("Missing message or signature", 400);
 
-        pgClient.connect();
+        await pgClient.connect();
 
         const result = await pgClient.query(`SELECT item_id FROM items WHERE item_id=$1`, [itemId]);
         if (result.rows.length > 0)
