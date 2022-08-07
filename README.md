@@ -12,6 +12,18 @@ npm install
 
 ## Testing Locally
 
+### Running DynamoDB Locally
+
+```shell
+docker run -p 8000:8000 amazon/dynamodb-local -jar DynamoDBLocal.jar -inMemory -sharedDb
+```
+
+### Creating the DynamoDB Table
+
+```shell
+aws dynamodb create-table --table-name items-table-dev --attribute-definitions AttributeName=id,AttributeType=S AttributeName=wallet,AttributeType=S --key-schema AttributeName=id,KeyType=HASH --global-secondary-indexes '[{ "IndexName": "wallet-index", "KeySchema": [{ "AttributeName": "wallet", "KeyType": "HASH" }], "Projection": { "ProjectionType": "ALL" }, "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5 }}]' --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 --endpoint-url http://localhost:8000
+```
+
 ### Configuration
 
 Place `.env` file at root
@@ -19,11 +31,11 @@ Place `.env` file at root
 ```ini
 WEB3_PROVIDER="https://"
 CONTRACT="0x0"
-POSTGRES_HOST="localhost"
-POSTGRES_PORT="5432"
-POSTGRES_DATABASE="postgres"
-POSTGRES_USERNAME="postgres"
-POSTGRES_PASSWORD="postgres"
+LOCAL_DYNAMODB_REGION='localhost'
+LOCAL_DYNAMODB_ENDPOINT='http://localhost:8000'
+LOCAL_DYNAMODB_ACCESS_KEY_ID='ACCESS_KEY_ID'
+LOCAL_DYNAMODB_SECRET_ACCESS_KEY='SECRET_ACCESS_KEY'
+ITEMS_TABLE='items-table-dev'
 ```
 
 ### Serverless Offline
