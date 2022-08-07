@@ -3,27 +3,31 @@ app: unin-api
 service: unin-api
 frameworkVersion: '2 || 3'
 
+custom:
+  tableName: 'items-table-${sls:stage}'
+
 provider:
   name: aws
   runtime: nodejs14.x
   lambdaHashingVersion: '20201221'
-  vpc:
-    securityGroupIds:
-      - ${param:securityGroupId1}
-      - ${param:securityGroupId2}
-    subnetIds:
-      - ${param:subnetId1}
-      - ${param:subnetId2}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource: '*'
 
 functions:
   api:
     handler: handler.handler
     environment:
-      POSTGRES_HOST: ${param:POSTGRES_HOST}
-      POSTGRES_PORT: ${param:POSTGRES_PORT}
-      POSTGRES_DATABASE: ${param:POSTGRES_DATABASE}
-      POSTGRES_USERNAME: ${param:POSTGRES_USERNAME}
-      POSTGRES_PASSWORD: ${param:POSTGRES_PASSWORD}
+      ITEMS_TABLE: ${self:custom.tableName}
       CONTRACT: ${param:CONTRACT}
       WEB3_PROVIDER: ${param:WEB3_PROVIDER}
     events:
@@ -43,6 +47,29 @@ functions:
           method: 'POST'
           path: "/items/{id}"
           cors: true
+
+resources:
+  Resources:
+    ItemsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: wallet
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: wallet-index
+            KeySchema:
+              - AttributeName: wallet
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${self:custom.tableName}
 
 plugins:
   - serverless-offline

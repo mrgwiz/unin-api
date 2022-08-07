@@ -2,7 +2,7 @@ const express = require("express");
 const serverless = require("serverless-http");
 const validator = require("validator");
 
-const { getPgClient } = require("./pgClient");
+const { getDynamoDbClient } = require("./dynamoDbClient");
 const { Web3Client } = require("./web3Client");
 
 if (process.env.IS_OFFLINE) {
@@ -38,13 +38,14 @@ const handleApiError = (err, res) => {
 function processRawItemData(rawData) {
     const processItem = (item) => {
         const [type, ...attrs] = item.uri;
+
         return {
             itemId: item.item_id,
             owner: item.owner,
             type,
-            attrs,
+            attrs: attrs.map(attr => +attr),
             name: item.name,
-            description: item.desc
+            description: item.description
         }
     };
 
@@ -56,47 +57,47 @@ function processRawItemData(rawData) {
 app.get('/items/owner/:owner', async function (req, res) {
     const { owner } = req.params;
 
-    const pgClient = getPgClient();
-
     try {
         if (!validator.isAlphanumeric(owner))
             throw new ApiError("Invalid owner", 400);
 
-        await pgClient.connect();
+        const dynamoDbClient = getDynamoDbClient();
 
-        const query = `SELECT owner, name, "desc", uri FROM items WHERE owner = $1`;
-        const { rows } = await pgClient.query(query, [owner]);
-        const processed = rows.map(processRawItemData);
+        const params = {
+            TableName: process.env.ITEMS_TABLE,
+            IndexName : "wallet-index",
+            KeyConditionExpression: 'wallet = :wallet',
+            ExpressionAttributeValues: { ':wallet': owner }
+        };
+
+        const { Items, Count } = await dynamoDbClient.query(params).promise();
+        const processed = Items.map(processRawItemData);
         res.status(200).json(processed);
     } catch (error) {
         handleApiError(error, res);
     }
-
-    pgClient.end();
 });
 
 app.get('/items/:id', async function (req, res) {
-    const pgClient = getPgClient();
-
     try {
         if (!validator.isNumeric(req.params.id))
             throw new ApiError("Invalid id", 400);
 
-        await pgClient.connect();
+        const dynamoDbClient = getDynamoDbClient();
 
-        const query = `SELECT owner, name, "desc", uri FROM items WHERE item_id = $1`;
-        const result = await pgClient.query(query, [req.params.id]);
+        const { Item } = await dynamoDbClient.get({
+            TableName: process.env.ITEMS_TABLE,
+            Key: { id: req.params.id }
+        }).promise();
 
-        if (result.rows.length === 0)
+        if (!Item)
             throw new ApiError("Item not found", 404);
 
-        const item = processRawItemData(result.rows[0]);
+        const item = processRawItemData(Item);
         res.status(200).json(item);
     } catch (error) {
         handleApiError(error, res);
     }
-    
-    pgClient.end();
 });
 
 app.post('/items/claim/:id', async function (req, res) {
@@ -105,8 +106,6 @@ app.post('/items/claim/:id', async function (req, res) {
         message,
         signature
     } = req.body;
-
-    const pgClient = getPgClient();
 
     try {
         if (!validator.isNumeric(itemId))
@@ -123,13 +122,23 @@ app.post('/items/claim/:id', async function (req, res) {
         if (owner.toLowerCase() != caller)
             throw new ApiError("Caller is not the owner of the item", 403);
 
-        await pgClient.connect();
+        const dynamoDbClient = getDynamoDbClient();
 
-        const query = `UPDATE items SET owner = $1 WHERE item_id = $2`;
-        const result = await pgClient.query(query, [caller, itemId]);
+        const params = {
+            TableName: process.env.ITEMS_TABLE,
+            Key: { id: itemId },
+            UpdateExpression: 'set wallet = :wallet, modifiedAt = :modifiedAt',
+            ExpressionAttributeValues: {
+                ':wallet': owner.toLowerCase(),
+                ':modifiedAt': new Date().toISOString()
+            },
+            ReturnValues: 'ALL_NEW'
+        };
 
-        if (!result.rowCount)
-            throw new ApiError("Item not found", 404);
+        const { Attributes } = await dynamoDbClient.update(params).promise();
+        if (Attributes?.wallet.toLowerCase() != owner.toLowerCase()) {
+            throw new ApiError("Item not claimed", 500);
+        }
 
         res.status(200).json({
             message: 'Item claimed successfully',
@@ -138,8 +147,6 @@ app.post('/items/claim/:id', async function (req, res) {
     } catch (error) {
         handleApiError(error, res);
     }
-
-    pgClient.end();
 });
 
 app.post('/items/:id', async function (req, res) {
@@ -150,8 +157,6 @@ app.post('/items/:id', async function (req, res) {
         message,
         signature
     } = req.body;
-
-    const pgClient = getPgClient();
 
     try {
         if (!validator.isNumeric(itemId))
@@ -166,10 +171,14 @@ app.post('/items/:id', async function (req, res) {
         if (!message || !signature)
             throw new ApiError("Missing message or signature", 400);
 
-        await pgClient.connect();
+        const dynamoDbClient = getDynamoDbClient();
 
-        const result = await pgClient.query(`SELECT item_id FROM items WHERE item_id=$1`, [itemId]);
-        if (result.rows.length > 0)
+        const { Item } = await dynamoDbClient.get({
+            TableName: process.env.ITEMS_TABLE,
+            Key: { id: itemId }
+        }).promise();
+
+        if (Item)
             throw new ApiError("Item already registered", 409);
                 
         const web3Client = new Web3Client();
@@ -183,18 +192,24 @@ app.post('/items/:id', async function (req, res) {
         const tokenUri = await web3Client.getItemUri(itemId);
         const uri = tokenUri.split(',');
     
-        const query = `INSERT INTO items
-            (item_id, owner, name, "desc", uri)
-            VALUES ($1, $2, $3, $4, $5)`;
+        const params = {
+            TableName: process.env.ITEMS_TABLE,
+            Item: {
+                id: itemId,
+                wallet: owner.toLowerCase(),
+                name,
+                description,
+                uri,
+                modifiedAt: new Date().toISOString()
+            }
+        };
 
-        await pgClient.query(query, [itemId, caller, name, description, uri]);
+        await dynamoDbClient.put(params).promise();
 
         res.status(201).json({ message: 'Item registered' });
     } catch (error) {
         handleApiError(error, res);
     }
-
-    pgClient.end();
 });
 
 app.use((req, res, next) => {
