@@ -40,8 +40,8 @@ function processRawItemData(rawData) {
         const [type, ...attrs] = item.uri;
 
         return {
-            itemId: item.item_id,
-            owner: item.owner,
+            itemId: item.id,
+            owner: item.wallet,
             type,
             attrs: attrs.map(attr => +attr),
             name: item.name,
